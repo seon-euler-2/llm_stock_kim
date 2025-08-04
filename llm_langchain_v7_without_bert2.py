@@ -299,6 +299,42 @@ def get_yf_stock_history(ticker: str, period: str) -> str:
     return df.tail().to_markdown()
 
 @tool
+def get_yf_cumulative_returns_tool(ticker_list: list, period: str = "3mo") -> str:
+    """
+    여러 종목의 누적 수익률 (Cumulative Returns)을 계산하여 비교 표로 반환합니다.
+    """
+    price_df = pd.DataFrame()
+
+    for ticker in ticker_list:
+        try:
+            df = yf.Ticker(ticker, session=session).history(period=period)
+            if df.empty:
+                continue
+            price_df[ticker] = df["Close"]
+        except Exception as e:
+            continue
+
+    if price_df.empty:
+        return "❗ 유효한 종목 가격 데이터를 가져올 수 없습니다."
+
+    # 누적 수익률 계산
+    rtn_df = price_df.pct_change().fillna(0)
+    cum_rtn_df = (1 + rtn_df).cumprod()
+
+    # 마지막 기준 수익률 요약
+    final_returns = (cum_rtn_df.iloc[-1] - 1).sort_values(ascending=False) * 100
+    summary_df = final_returns.to_frame(name="누적 수익률 (%)")
+    summary_df.index.name = "종목"
+
+    # ✅ 세션 상태 저장 (차트용)
+    st.session_state["latest_cum_rtn_df"] = cum_rtn_df.copy()
+
+    return f"📊 {period} 기간 누적 수익률 비교\n\n" + summary_df.round(2).to_markdown()
+
+
+
+
+@tool
 def get_yf_stock_info(ticker: str) -> str:
     """해당 종목의 Yahoo Finance 정보를 반환합니다."""
     stock = yf.Ticker(ticker, session= session)
@@ -798,6 +834,7 @@ tools = [
     get_current_time,
     get_yf_stock_info,
     get_yf_stock_history,
+    get_yf_cumulative_returns_tool,
     get_yf_stock_recommendations,
     plot_history_chart,  # ✅ 추가
     get_backtest_tool,  # ✅ 추가
