@@ -28,7 +28,7 @@ from dotenv import load_dotenv
 import os
 from no_ssl_verification import no_ssl_verification
 # .env 파일에서 환경 변수 로드
-load_dotenv()wj
+load_dotenv()
 
 import pandas as pd
 import os
