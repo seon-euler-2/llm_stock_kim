@@ -298,6 +298,7 @@ def get_yf_stock_history(ticker: str, period: str) -> str:
 
     return df.tail().to_markdown()
 
+
 @tool
 def get_yf_cumulative_returns_tool(ticker_list: list, period: str = "3mo") -> str:
     """
@@ -330,6 +331,8 @@ def get_yf_cumulative_returns_tool(ticker_list: list, period: str = "3mo") -> st
     st.session_state["latest_cum_rtn_df"] = cum_rtn_df.copy()
 
     return f"📊 {period} 기간 누적 수익률 비교\n\n" + summary_df.round(2).to_markdown()
+
+
 
 
 
@@ -406,6 +409,7 @@ def plot_history_chart() -> str:
 
     else:
         return "❗ 시각화할 데이터가 없습니다. 먼저 get_yf_stock_history 또는 get_yf_cumulative_returns_tool을 호출해주세요."
+
 
 
 @tool
@@ -913,6 +917,7 @@ with st.expander("📌 사용할 수 있는 기능 요약 보기"):
 | `get_current_time` | 지정한 타임존의 현재 시간을 보여줍니다. | `"서울의 현재 시간을 알려줘"` |
 | `get_yf_stock_info` | 입력한 종목 티커의 Yahoo Finance 정보를 반환합니다. | `"AAPL 종목 정보 알려줘"` |
 | `get_yf_stock_history` | 종목의 주가 이력을 가져옵니다. | `"TSLA의 최근 주가 흐름 보여줘"` |
+| `get_yf_cumulative_returns_tool` | 여러 종목의 누적 수익률을 가져옵니다. | `"TSLA, PLTR의 1년 누적수익률 흐름 보여줘"` |
 | `get_yf_stock_recommendations` | 애널리스트들의 종목 추천 데이터를 보여줍니다. | `"NVDA에 대한 리서치 추천 보여줘"` |
 | `plot_history_chart` | 주가 이력을 시각화합니다. (이전 조회 필요) | `"차트로 보여줘"` |
 | `get_backtest_tool` | 포트폴리오 누적 수익률 백테스트 실행 | `"AAPL과 MSFT로 5년 백테스트 해줘"` |
