@@ -28,7 +28,7 @@ from dotenv import load_dotenv
 import os
 from no_ssl_verification import no_ssl_verification
 # .env 파일에서 환경 변수 로드
-load_dotenv()
+load_dotenv()wj
 
 import pandas as pd
 import os
@@ -827,26 +827,40 @@ llm_with_tools = llm.bind_tools(tools)
 
 # 사용자의 메시지 처리하기 위한 함수
 def get_ai_response(messages):
-    response = llm_with_tools.stream(messages) # ① llm.stream()을 llm_with_tools.stream()로 변경
-    
-    gathered = None # ②
+    response = llm_with_tools.stream(messages)  # ① LLM + tool 사용
+
+    gathered = None  # ② 전체 메시지를 누적할 변수
+
     for chunk in response:
         yield chunk
-        
-        if gathered is None: #  ③
+
+        if gathered is None:
             gathered = chunk
         else:
             gathered += chunk
- 
+
+    # ③ tool_calls가 있다면, 해당 tool 호출 후 ToolMessage로 응답
     if gathered.tool_calls:
         st.session_state.messages.append(gathered)
-        
+
         for tool_call in gathered.tool_calls:
-            selected_tool = tool_dict[tool_call['name']]
-            tool_msg = selected_tool.invoke(tool_call) 
-            print(tool_msg, type(tool_msg))
-            st.session_state.messages.append(tool_msg)
-           
+            try:
+                selected_tool = tool_dict[tool_call["name"]]
+                tool_output = selected_tool.invoke(tool_call)
+
+                tool_msg = ToolMessage(
+                    tool_call_id=tool_call["id"],
+                    content=str(tool_output)
+                )
+                st.session_state.messages.append(tool_msg)
+
+            except Exception as e:
+                st.session_state.messages.append(ToolMessage(
+                    tool_call_id=tool_call["id"],
+                    content=f"❌ 도구 호출 실패: {str(e)}"
+                ))
+
+        # ④ tool 실행 후, 재귀적으로 LLM 호출
         for chunk in get_ai_response(st.session_state.messages):
             yield chunk
 
