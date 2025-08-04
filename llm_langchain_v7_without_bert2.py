@@ -333,7 +333,6 @@ def get_yf_cumulative_returns_tool(ticker_list: list, period: str = "3mo") -> st
 
 
 
-
 @tool
 def get_yf_stock_info(ticker: str) -> str:
     """해당 종목의 Yahoo Finance 정보를 반환합니다."""
@@ -388,16 +387,25 @@ def get_backtest_tool(ticker_list: list[str], period: str = "5y") -> str:
 def plot_history_chart() -> str:
     """
     가장 최근에 조회한 주가 데이터를 기반으로 차트를 시각화합니다.
-    (get_yf_stock_history 이후에 호출되어야 합니다)
+    
+    - 단일 종목 (get_yf_stock_history 호출 시): 종가 차트
+    - 복수 종목 (get_yf_cumulative_returns_tool 호출 시): 누적 수익률 차트
     """
-    df = st.session_state.get("latest_history_chart")
+    chart_data = st.session_state.get("latest_history_chart")
+    cum_rtn_data = st.session_state.get("latest_cum_rtn_df")
 
-    if df is None or df.empty:
-        return "❗ 시각화할 주가 데이터가 없습니다. 먼저 get_yf_stock_history를 호출해주세요."
+    if chart_data is not None and not chart_data.empty:
+        st.subheader("📈 단일 종목 주가 히스토리 차트")
+        st.line_chart(chart_data, use_container_width=True)
+        return "✅ 단일 종목 주가 차트 시각화 완료"
 
-    st.subheader("📈 주가 히스토리 차트")
-    st.line_chart(df, use_container_width=True)
-    return "✅ 주가 히스토리 차트 시각화 완료"
+    elif cum_rtn_data is not None and not cum_rtn_data.empty:
+        st.subheader("📈 복수 종목 누적 수익률 비교 차트")
+        st.line_chart(cum_rtn_data, use_container_width=True)
+        return "✅ 누적 수익률 차트 시각화 완료"
+
+    else:
+        return "❗ 시각화할 데이터가 없습니다. 먼저 get_yf_stock_history 또는 get_yf_cumulative_returns_tool을 호출해주세요."
 
 
 @tool
