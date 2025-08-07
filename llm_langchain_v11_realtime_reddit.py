@@ -18,6 +18,7 @@ from googlesearch import search  # google 라이브러리 사용
 from pytrends.request import TrendReq
 from langchain_openai import ChatOpenAI
 from dotenv import load_dotenv
+from no_ssl_verification import no_ssl_verification
 load_dotenv()
 import time
 from collections import Counter
@@ -33,6 +34,8 @@ import json
 from requests.auth import HTTPBasicAuth
 
 import streamlit as st
+
+from code_merge3 import get_all_us_tickers, extract_tickers_from_text, filter_relevant_tickers_with_gpt, get_detailed_info
 from collections import Counter, defaultdict
 
 import ssl
@@ -82,11 +85,78 @@ def no_ssl_verification():
             except:
                 pass
 
+def run_reddit_summary(limit=20, subreddit="wallstreetbets") -> str:
+    reddit = praw.Reddit(
+        client_id="RVKUBtrh7ExzRSbddfBDtg",
+        client_secret="cT4m_YrJnZhZpZ2vPkVTfMT8hqj07A",
+        user_agent="retail_stock_v1.0 (by /u/TraditionalIce9098)",
+        check_for_async=False
+    )
+    reddit._core._requestor._http.verify = False
+
+    tickers_set = get_all_us_tickers()
+    posts = list(reddit.subreddit(subreddit).hot(limit=limit))
+
+    ticker_counter = Counter()
+    ticker_posts = defaultdict(list)
+
+    for post in posts:
+        combined_text = (post.title or "") + " " + (post.selftext or "")
+        raw_tickers = extract_tickers_from_text(combined_text, tickers_set)
+        filtered = filter_relevant_tickers_with_gpt(post.title, post.selftext, raw_tickers)
+
+        for ticker in filtered:
+            ticker_counter[ticker] += 1
+            ticker_posts[ticker].append({
+                "title": post.title,
+                "url": f"https://www.reddit.com{post.permalink}",
+                "body": post.selftext
+            })
+
+    if not ticker_counter:
+        return "❗ 유효한 종목 언급이 포함된 게시물이 없습니다."
+
+    top = ticker_counter.most_common(10)
+    result = "# 📊 Reddit 인기 종목 분석\n\n"
+    for rank, (ticker, count) in enumerate(top, 1):
+        info = get_detailed_info(ticker)
+        if not info:
+            continue
+        symbol = "📈" if info["change_pct"] > 0 else "📉" if info["change_pct"] < 0 else "➡️"
+        market_cap = info["market_cap"]
+        mc = f"${market_cap:,}" if market_cap else "N/A"
+
+        result += f"""
+### {rank}. [{ticker}](https://finance.yahoo.com/quote/{ticker}) — {count}회 언급  
+- 💵 현재가: ${info['price']} ({symbol} {info['change_pct']}%)  
+- 🏷️ 섹터: {info['sector']} / {info['industry']}  
+- 💰 시가총액: {mc}  
+- 📊 PER: {info['pe_ratio'] or 'N/A'}  
+- 🔗 관련 게시글:\n"""
+
+        for post in ticker_posts[ticker][:3]:
+            preview = post["body"][:100].replace("\n", " ") + "…" if post["body"] else ""
+            result += f"  - [{post['title']}]({post['url']}) — {preview}\n"
+
+        result += "\n"
+    return result.strip()
+
+
 load_dotenv()
 api_key = os.getenv('OPENAI_API_KEY')
 
 # Reddit 인증 정보
+reddit_client_id = "RVKUBtrh7ExzRSbddfBDtg"
+reddit_client_secret = "cT4m_YrJnZhZpZ2vPkVTfMT8hqj07A"
+reddit_user_agent = "retail_stock_v1.0 (by /u/TraditionalIce9098)"
 
+# Reddit 클라이언트 생성
+reddit = praw.Reddit(
+    client_id=reddit_client_id,
+    client_secret=reddit_client_secret,
+    user_agent=reddit_user_agent,
+    check_for_async=False
+)
 
 # GPT를 사용해 관련 종목 추출
 def extract_related_tickers(title, body, model="gpt-4o"):
@@ -386,82 +456,30 @@ def get_detailed_info(ticker):
     except Exception:
         return None
 
+
+
+
+
+
+
 llm = ChatOpenAI(model = 'gpt-4o')
 
 # 도구 함수 정의
 
-# reddit_tool.py
-from langchain_core.tools import tool
-from pydantic import BaseModel
-import re
-import pandas as pd
-import reddit_data_collector as rdc
-
-client_id = os.getenv("REDDIT_CLIENT_ID")
-client_secret = os.getenv("REDDIT_CLIENT_SECRET")
-username = os.getenv("REDDIT_USER_AGENT")
-password = os.getenv('REDDIT_USER_PASSWORD')
-user_agent = os.getenv("REDDIT_USER_AGENT")
-
-
-data_collector = rdc.DataCollector(
-    client_id=client_id,
-    client_secret=client_secret,
-    user_agent=user_agent,
-    username=username,
-    password=password
-)
-
-
-from langchain.docstore.document import Document
-from langchain_core.tools import tool
-from pydantic import BaseModel
-
-### ✅ Reddit 수집 데이터 저장 함수 (posts/comments)
-def save_reddit_data(posts, comments, save_dir="data/reddit"):
-    os.makedirs(save_dir, exist_ok=True)
-    posts.to_csv(os.path.join(save_dir, "reddit_posts.csv"), index=False)
-    comments.to_csv(os.path.join(save_dir, "reddit_comments.csv"), index=False)
-
-
-### ✅ posts/comments → 문서(Document)로 변환
-def convert_posts_comments_to_documents(posts, comments):
-    documents = []
-    for _, row in posts.iterrows():
-        content = f"[POST] {row['title']}\n\n{row.get('selftext', '')}"
-        documents.append(Document(page_content=content, metadata={"type": "post", "id": row['id']}))
-    for _, row in comments.iterrows():
-        content = f"[COMMENT] {row['body']}"
-        documents.append(Document(page_content=content, metadata={"type": "comment", "id": row['id']}))
-    return documents
-
-
-### ✅ LangChain Tool 내부에서 데이터 저장하는 헬퍼 함수
-def save_and_prepare_rag(posts, comments):
-    save_reddit_data(posts, comments)
-    st.session_state["latest_reddit_posts"] = posts
-    st.session_state["latest_reddit_comments"] = comments
-
-
-# ✅ 입력 schema 정의
-class RedditPostCommentInput(BaseModel):
-    post_limit: int = 100
-
-# ✅ LangChain tool 정의
-@tool(args_schema=RedditPostCommentInput)
+@tool
 def reddit_post_comment_analysis(post_limit: int = 100) -> str:
     """
     실시간 Reddit에서 게시글/댓글을 수집하여 종목명을 추출하고, 관심도 통계를 계산합니다.
     수집 대상: r/wallstreetbets, hot 게시글 상위 post_limit개
     """
+    import re
+    import pandas as pd
+    from collections import Counter
+    from stock_reddit_v2 import RedditDataCollector, no_ssl_verification
+
     try:
-        data_collector = rdc.DataCollector(
-    client_id=client_id,
-    client_secret=client_secret,
-    user_agent=user_agent,
-    username=username,
-    password=password
-)
+        # Reddit 데이터 수집
+        data_collector = RedditDataCollector()
         with no_ssl_verification():
             posts, comments = data_collector.get_data(
                 subreddits=["wallstreetbets"],
@@ -473,22 +491,12 @@ def reddit_post_comment_analysis(post_limit: int = 100) -> str:
                 dataframe=True
             )
 
-        save_and_prepare_rag(posts, comments)
-
-
         ticker_pattern = re.compile(r'\b[A-Z]{2,5}\b')
         stopwords = {"YOLO", "THIS", "THE", "GOD", "EDIT", "LOL", "LIKE", "JUST", "LOVE", "POST", "WHAT", "WHEN", "THAT", "WITH"}
 
         def extract_valid_tickers(text):
             tickers = ticker_pattern.findall(str(text))
             return [t for t in tickers if t not in stopwords]
-        
-
-        valid_tickers = get_all_us_tickers()
-
-        def extract_valid_tickers(text):
-            tickers = re.findall(r'\b[A-Z]{1,5}\b', str(text).upper())
-            return [t for t in tickers if t in valid_tickers]
 
         posts['tickers'] = posts['title'].apply(extract_valid_tickers)
         comments['post_id_clean'] = comments['post_id'].str.replace("t3_", "", regex=False)
@@ -990,6 +998,7 @@ def compare_google_trend_tool(keywords: list[str], geo: str = "world") -> str:
 # ----- 도구 바인딩 -----
 tools = [
     reddit_post_comment_analysis,
+    reddit_post_comment_analysis,
     get_current_time,
     get_yf_stock_info,
     get_yf_stock_history,
@@ -1051,48 +1060,6 @@ def get_ai_response(messages):
 
 
 # Streamlit 앱
-# 사용자의 메시지 처리하기 위한 함수
-def get_ai_response(messages):
-    response = llm_with_tools.stream(messages)  # ① LLM + tool 사용
-
-    gathered = None  # ② 전체 메시지를 누적할 변수
-
-    for chunk in response:
-        yield chunk
-
-        if gathered is None:
-            gathered = chunk
-        else:
-            gathered += chunk
-
-    # ③ tool_calls가 있다면, 해당 tool 호출 후 ToolMessage로 응답
-    if gathered.tool_calls:
-        st.session_state.messages.append(gathered)
-
-        for tool_call in gathered.tool_calls:
-            try:
-                selected_tool = tool_dict[tool_call["name"]]
-                tool_output = selected_tool.invoke(tool_call)
-
-                tool_msg = ToolMessage(
-                    tool_call_id=tool_call["id"],
-                    content=str(tool_output)
-                )
-                st.session_state.messages.append(tool_msg)
-
-            except Exception as e:
-                st.session_state.messages.append(ToolMessage(
-                    tool_call_id=tool_call["id"],
-                    content=f"❌ 도구 호출 실패: {str(e)}"
-                ))
-
-        # ④ tool 실행 후, 재귀적으로 LLM 호출
-        for chunk in get_ai_response(st.session_state.messages):
-            yield chunk
-
-
-# Streamlit 앱
-# Streamlit 앱
 st.title("💬 GPT-4o Stock Chain Bot")
 
 with st.expander("📌 사용할 수 있는 기능 요약 보기"):
@@ -1113,7 +1080,7 @@ with st.expander("📌 사용할 수 있는 기능 요약 보기"):
 | `get_company_news_with_sentiment` | Naver 뉴스에서 기사 + 감성 점수로 요약 | `"LG에너지솔루션 뉴스 감성 요약"` |
 | `get_google_trend_tool` | Google 검색 트렌드 분석 (최근 3개월) | `"애플 검색 트렌드 보여줘"` |
 | `compare_google_trend_tool` | 여러 키워드 검색량 비교 | `"삼성전자와 애플 검색량 비교"` |
-| `reddit_post_comment_analysis` | Reddit에서 인기 게시글 수집 | `"wallstreetbets에서 최근 인기 글 가져와줘"` |
+| `reddit_stock_summary_tool` | Reddit에서 인기 게시글 수집 | `"wallstreetbets에서 최근 인기 글 가져와줘"` |
     """)
 
 
@@ -1147,3 +1114,9 @@ if prompt := st.chat_input():
     result = st.chat_message("assistant").write_stream(response) # AI 메시지 출력
     st.session_state["messages"].append(AIMessage(result)) # AI 메시지 저장    
     
+    
+with st.expander("🧠 Reddit 종목 요약 직접 실행"):
+    if st.button("Reddit 종목 분석 실행"):
+        with st.spinner("Reddit 분석 중..."):
+            summary = run_reddit_summary(limit=30, subreddit="wallstreetbets")
+            st.markdown(summary, unsafe_allow_html=True)
